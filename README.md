@@ -1,62 +1,65 @@
-# digital_thermal_right_lcd
-A program that displays temperature on the thermal right cpu cooler's digital screen for Linux.
+# Digital Thermal Right LCD Controller
 
-# To build the controller :
+This project allows you to control the Thermalright USB LCD screen on Linux.
+It provides a Python controller to display system metrics (CPU/GPU temp/usage) and a shell script to configure the display.
 
-## Create a python environement:
-`python3 -m venv .venv`
+## Features
 
-## Source the environnement:
-`source .venv/bin/activate`
+- Display CPU/GPU temperature and usage.
+- Multiple display modes.
+- Configurable colors and gradients.
+- Animated rainbow and wave patterns.
+- Configuration via a shell script menu.
+- GUI for live display preview and color configuration.
 
-## Install the requirements:
-`pip install -r requirements.txt`
+## Prerequisites
 
-## Build as executable : 
-`pyinstaller --onefile src/controller.py`
+- Python 3
+- `hidapi` library for your distribution.
+  - On Arch Linux: `sudo pacman -S hidapi`
+  - On Debian/Ubuntu: `sudo apt-get install libhidapi-dev`
+- Python dependencies can be installed via `pip`.
 
-You may also launch it directcly with python
+## Installation
 
-`python3 src/controller.py config.json`
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/your-username/digital_thermal_right_lcd.git
+    cd digital_thermal_right_lcd
+    ```
 
-# Set up as a service so it start at each startup: 
-Create a file in /etc/systemd/system/digital_lcd_controller.service:
-`sudo nano /etc/systemd/system/digital_lcd_controller.service`
+2.  **Install Python dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-Write this inside :
+3.  **Run the installation script:**
+    This script will set up the `udev` rule to allow running without `sudo` and create a `systemd` service to run the display controller on startup.
+    ```bash
+    sudo ./install.sh
+    ```
+
+## Usage
+
+### Configuration
+
+To configure the display, run the `led_control.sh` script:
+```bash
+./led_control.sh
 ```
-[Unit]
-Description=Lcd screen controller
-After=network.target udev.service systemd-modules-load.service
+This will open a menu where you can change display modes, colors, and other settings.
 
-[Service]
-ExecStart=/path/to/the/executable /path/to/the/config.json
-User=yourusername
-Group=yourusername
-Type=simple
-Restart=always
-RestartSec=5s
+### GUI
 
-
-[Install]
-WantedBy=multi-user.target
+A graphical interface is available for live preview and color customization.
+To run the GUI:
+```bash
+python src/led_display_ui.py
 ```
 
-#  Modify the config with the UI :
+## Uninstallation
 
-`python3 src/led_display_ui.py config.json`
-
-# Troubleshooting
-If the libhidapi is missing :
-ImportError: Unable to load any of the following libraries:libhidapi-hidraw.so libhidapi-hidraw.so.0 libhidapi-libusb.so libhidapi-libusb.so.0 libhidapi-iohidmanager.so libhidapi-iohidmanager.so.0 libhidapi.dylib hidapi.dll libhidapi-0.dll
-Install it with :
-`sudo apt update && sudo apt install libhidapi-hidraw0 libhidapi-libusb0`
-
-If the device can't be found : 
-"Error initializing HID device: unable to open device No device found, with VENDOR_ID: 1046, PRODUCT_ID: 32769"
-Try running the controller as root : 
-`sudo python3 src/controller.py config.json`
-The correct way to fix this problem is to create a udev rule by editing this file "/etc/udev/rules.d/99-hid-device.rules" : 
-`sudo nano /etc/udev/rules.d/99-hid-device.rules`
-and paste this line : 
-`SUBSYSTEM=="usb", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="8001", MODE="0666"`
+To uninstall the service and udev rule, run the `uninstall.sh` script:
+```bash
+sudo ./uninstall.sh
+```
