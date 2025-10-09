@@ -32,8 +32,10 @@ It provides a Python controller to display system metrics (CPU/GPU temp/usage) a
     cd digital_thermal_right_lcd
     ```
 
-2.  **Install Python dependencies:**
+2.  **Create a virtual environment and install dependencies:**
     ```bash
+    python3 -m venv .venv
+    source .venv/bin/activate
     pip install -r requirements.txt
     ```
 

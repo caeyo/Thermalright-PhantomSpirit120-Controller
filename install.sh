@@ -43,7 +43,7 @@ Description=Digital Thermal Right LCD Controller
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python ${SCRIPT_DIR}/src/controller.py
+ExecStart=${SCRIPT_DIR}/.venv/bin/python ${SCRIPT_DIR}/src/controller.py
 WorkingDirectory=${SCRIPT_DIR}
 Restart=always
 User=${SUDO_USER}

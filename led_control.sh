@@ -611,10 +611,10 @@ quick_presets() {
             ;;
         9)
             # Quadrant Metric Colors - Fixed to include LED and unit indicators
-            local temp_gradient_str="cpu_temp;0000ff:30;00ff00:45;ffff00:60;ff8c00:75;ff0000:100"
-            local usage_gradient_str="cpu_usage;0000ff:30;00ff00:45;ffff00:60;ff8c00:75;ff0000:100"
-            local gpu_temp_gradient="gpu_temp;0000ff:30;00ff00:45;ffff00:60;ff8c00:75;ff0000:100"
-            local gpu_usage_gradient="gpu_usage;0000ff:30;00ff00:45;ffff00:60;ff8c00:75;ff0000:100"
+            local temp_gradient_str="cpu_temp;0000ff:25;00ff00:45;ffff00:60;ff8c00:75;ff0000:100"
+            local usage_gradient_str="cpu_usage;0000ff:25;00ff00:45;ffff00:60;ff8c00:75;ff0000:100"
+            local gpu_temp_gradient="gpu_temp;0000ff:25;00ff00:45;ffff00:60;ff8c00:75;ff0000:100"
+            local gpu_usage_gradient="gpu_usage;0000ff:25;00ff00:45;ffff00:60;ff8c00:75;ff0000:100"
 
             # CPU LED (0-1)
             set_led_range_color 0 1 "$temp_gradient_str" "metrics"
