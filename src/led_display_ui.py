@@ -162,15 +162,52 @@ class LEDDisplayUI:
                 current_time = time.time()
                 elapsed_time = (current_time - self.start_time)%(self.cycle_duration*2)
                 colors = np.array(self.config[self.get_color_key()]["colors"])
-                for index in range(self.number_of_leds):
-                    color = colors[index]
+                for index, color_str in enumerate(colors):
+                    color = color_str
                     if color.lower() == "random":
                         color = get_random_color()
+                    elif color.startswith("wave_"):
+                        wave_type, gradient = color.split(";", 1)
+                        colors_list = gradient.split('-')
+                        num_colors = len(colors_list)
+
+                        if num_colors >= 2:
+                            if colors_list[0] != colors_list[-1]:
+                                colors_list.append(colors_list[0])
+                            
+                            num_segments = len(colors_list) - 1
+                            total_duration = self.cycle_duration
+                            
+                            if wave_type == "wave_ltr":
+                                phase_shift = (index / self.number_of_leds) * total_duration
+                            else: # wave_rtl
+                                phase_shift = ((self.number_of_leds - index) / self.number_of_leds) * total_duration
+                            
+                            time_in_cycle = ((current_time - self.start_time) + phase_shift) % total_duration
+                            
+                            if num_segments > 0:
+                                segment_duration = total_duration / num_segments
+                                segment_index = min(int(time_in_cycle / segment_duration), num_segments - 1)
+                                
+                                start_color = colors_list[segment_index]
+                                end_color = colors_list[segment_index + 1]
+                                
+                                time_in_segment = time_in_cycle - (segment_index * segment_duration)
+                                if segment_duration > 0:
+                                    factor = time_in_segment / segment_duration
+                                else:
+                                    factor = 0
+                                color = interpolate_color(start_color=start_color, end_color=end_color, factor=factor)
+                            else:
+                                color = colors_list[0]
+                        else:
+                            color = colors_list[0]
                     elif "-" in color:
                         split_color = color.split("-")
                         if len(split_color) == 3:
                             start_color, end_color, metric = split_color
                             factor=elapsed_time/(self.cycle_duration*2)
+                            color = interpolate_color(start_color=start_color, end_color=end_color, factor=factor)
                         else:
                             colors_list = split_color
                             num_colors = len(colors_list)
@@ -192,11 +229,11 @@ class LEDDisplayUI:
                                 
                                 time_in_segment = time_in_cycle - (segment_index * segment_duration)
                                 factor = time_in_segment / segment_duration
+                                
+                                color = interpolate_color(start_color=start_color, end_color=end_color, factor=factor)
                             else:
-                                start_color = colors_list[0]
-                                end_color = colors_list[0]
-                                factor = 0
-                        color = interpolate_color(start_color=start_color, end_color=end_color, factor=factor)
+                                color = colors_list[0]
+
                     self.set_ui_color(index, color="#"+color)
             except Exception as e:
                 print(f"Error in update_ui_loop: {e}")

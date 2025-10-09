@@ -538,7 +538,7 @@ configure_intervals() {
 quick_presets() {
     clear
     echo -e "${CYAN}╔═══════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║     Quick Presets                                      ║${NC}"
+    echo -e "${CYYAN}║     Quick Presets                                      ║${NC}"
     echo -e "${CYAN}╚═══════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${GREEN}1)${NC} Gaming Mode (peerless_standard, temp-based colors)"
@@ -550,11 +550,13 @@ quick_presets() {
     echo -e "${GREEN}7)${NC} Temperature Gradient Preset"
     echo -e "${GREEN}8)${NC} Usage Gradient Preset"
     echo -e "${GREEN}9)${NC} Quadrant Metric Colors"
+    echo -e "${GREEN}10)${NC} Wave L-to-R"
+    echo -e "${GREEN}11)${NC} Wave R-to-L"
     echo ""
     echo -e "${GREEN}0)${NC} Back to main menu"
     echo ""
 
-    read -p "Select preset (0-9): " choice
+    read -p "Select preset (0-11): " choice
 
     case $choice in
         1)
@@ -655,6 +657,18 @@ quick_presets() {
             set_led_range_color 82 83 "$gpu_temp_gradient" "metrics"
 
             echo -e "${GREEN}Quadrant Metric Colors preset applied${NC}"
+            ;;
+        10)
+            local gradient="wave_ltr;ff0000-ffff00-00ff00-00ffff-0000ff-ff00ff-ff0000"
+            local json_array=$(for i in $(seq 1 84); do echo -n "\"${gradient}\","; done | sed 's/.$//')
+            jq --argjson colors "[$json_array]" '.metrics.colors = $colors | .time.colors = $colors' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+            echo -e "${GREEN}Wave L-to-R preset applied${NC}"
+            ;;
+        11)
+            local gradient="wave_rtl;ff0000-ffff00-00ff00-00ffff-0000ff-ff00ff-ff0000"
+            local json_array=$(for i in $(seq 1 84); do echo -n "\"${gradient}\","; done | sed 's/.$//')
+            jq --argjson colors "[$json_array]" '.metrics.colors = $colors | .time.colors = $colors' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+            echo -e "${GREEN}Wave R-to-L preset applied${NC}"
             ;;
         0) return ;;
         *)

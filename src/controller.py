@@ -327,9 +327,45 @@ class Controller:
             if metrics is None:
                 metrics = self.metrics.get_metrics(self.temp_unit)
             colors = []
-            for color in conf_colors:
+            for i, color in enumerate(conf_colors):
                 if color.lower() == "random":
                     colors.append(get_random_color())
+                elif color.startswith("wave_"):
+                    wave_type, gradient = color.split(";", 1)
+                    colors_list = gradient.split('-')
+                    num_colors = len(colors_list)
+                    
+                    if num_colors >= 2:
+                        if colors_list[0] != colors_list[-1]:
+                            colors_list.append(colors_list[0])
+                        
+                        num_segments = len(colors_list) - 1
+                        total_duration = self.cycle_duration
+                        
+                        if wave_type == "wave_ltr":
+                            phase_shift = (i / NUMBER_OF_LEDS) * total_duration
+                        else: # wave_rtl
+                            phase_shift = ((NUMBER_OF_LEDS - i) / NUMBER_OF_LEDS) * total_duration
+                        
+                        time_in_cycle = (self.cpt + phase_shift) % total_duration
+                        
+                        if num_segments > 0:
+                            segment_duration = total_duration / num_segments
+                            segment_index = min(int(time_in_cycle / segment_duration), num_segments - 1)
+                            
+                            start_color = colors_list[segment_index]
+                            end_color = colors_list[segment_index + 1]
+                            
+                            time_in_segment = time_in_cycle - (segment_index * segment_duration)
+                            if segment_duration > 0:
+                                factor = time_in_segment / segment_duration
+                            else:
+                                factor = 0
+                            colors.append(interpolate_color(start_color, end_color, factor))
+                        else:
+                            colors.append(colors_list[0])
+                    else:
+                        colors.append(colors_list[0])
                 elif ";" in color:  # New multi-stop gradient format
                     parts = color.split(';')
                     metric = parts[0]
@@ -355,10 +391,10 @@ class Controller:
                         colors.append(stops[-1]['color'])
                         continue
 
-                    for i in range(len(stops) - 1):
-                        if stops[i]['value'] <= metric_value < stops[i+1]['value']:
-                            start_stop = stops[i]
-                            end_stop = stops[i+1]
+                    for j in range(len(stops) - 1):
+                        if stops[j]['value'] <= metric_value < stops[j+1]['value']:
+                            start_stop = stops[j]
+                            end_stop = stops[j+1]
                             factor = (metric_value - start_stop['value']) / (end_stop['value'] - start_stop['value'])
                             colors.append(interpolate_color(start_stop['color'], end_stop['color'], factor))
                             break
