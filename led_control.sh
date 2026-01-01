@@ -220,10 +220,10 @@ set_metric_gradient() {
     read -p "Select metric: " metric_choice
 
     case $metric_choice in
-        1) metric="cpu_temp" ;;
-        2) metric="cpu_usage" ;;
-        3) metric="gpu_temp" ;;
-        4) metric="gpu_usage" ;;
+        1) metric="cpu_temp"; start_led=2; end_led=23 ;;
+        2) metric="cpu_usage"; start_led=25; end_led=41 ;;
+        3) metric="gpu_temp"; start_led=60; end_led=81 ;;
+        4) metric="gpu_usage"; start_led=42; end_led=58 ;;
         *) echo -e "${RED}Invalid choice${NC}"; return ;;
     esac
 
@@ -254,10 +254,23 @@ set_metric_gradient() {
         return
     fi
 
-    local json_array=$(for i in $(seq 1 84); do echo -n "\"${gradient_string}\","; done | sed 's/.$//')
-    jq --argjson colors "[$json_array]" '.metrics.colors = $colors' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+    # Get current colors array
+    local current_colors=$(jq -r '.metrics.colors' "$CONFIG_FILE")
 
-    echo -e "${GREEN}Metric-based gradient applied for $metric${NC}"
+    # Update only the specific LED range for this metric
+    local updated_colors=$(echo "$current_colors" | jq --arg gradient "$gradient_string" --argjson start "$start_led" --argjson end "$end_led" '
+        to_entries | map(
+            if .key >= $start and .key <= $end then
+                .value = $gradient
+            else
+                .
+            end
+        ) | map(.value)
+    ')
+
+    jq --argjson colors "$updated_colors" '.metrics.colors = $colors' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+
+    echo -e "${GREEN}Metric-based gradient applied for $metric (LEDs $start_led-$end_led)${NC}"
     sleep 2
 }
 

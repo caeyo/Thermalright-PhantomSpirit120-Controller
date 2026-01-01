@@ -1,5 +1,4 @@
 hid==1.0.8
--e file:///mnt/archive/cooler_screen/digital_thermal_right_lcd
 numpy==2.3.3
 psutil==7.1.0
 pyamdgpuinfo==2.1.7
