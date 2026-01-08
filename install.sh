@@ -74,7 +74,7 @@ if [ ! -f "$VENV_DIR/bin/python" ]; then
   exit 1
 fi
 
-# Create udev rule
+# Create udev rule for USB device
 UDEV_RULE_FILE="/etc/udev/rules.d/70-digital-thermal-right-lcd.rules"
 if [ ! -f "$UDEV_RULE_FILE" ]; then
   echo "Creating udev rule at $UDEV_RULE_FILE"

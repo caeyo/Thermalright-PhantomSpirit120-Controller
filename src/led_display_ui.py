@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, colorchooser
 import json
 import sys
-from config import leds_indexes, leds_indexes_small, NUMBER_OF_LEDS, display_modes, default_config, display_modes_small
+from config import leds_indexes, NUMBER_OF_LEDS, display_modes, default_config
 import numpy as np
 import threading
 import time
@@ -34,21 +34,13 @@ class LEDDisplayUI:
         self.root.title("LED Display Layout")
         self.style = ttk.Style()
         self.leds_indexes = leds_indexes
-        # Layout mode selection
-        self.layout_mode = tk.StringVar(value=self.config.get("layout_mode", "big"))
-        layout_mode_frame = ttk.LabelFrame(root, text="Choose layout mode:", padding=(10, 10))
-        layout_mode_frame.grid(row=0, column=0, pady=10)
-        layout_dropdown = ttk.Combobox(layout_mode_frame, textvariable=self.layout_mode, state="readonly")
-        layout_dropdown["values"] = ["big", "small"]
-        layout_dropdown.grid(row=0, column=0, padx=5, pady=5)
-        layout_dropdown.bind("<<ComboboxSelected>>", lambda e: self.change_layout_mode())
 
         # Frames for layout
         self.layout_frame = ttk.Frame(root)
-        self.layout_frame.grid(row=1, column=0, columnspan=3, padx=10, pady=10)
+        self.layout_frame.grid(row=0, column=0, columnspan=3, padx=10, pady=10)
 
-        # Create initial layout (big)
-        self.change_layout_mode()
+        # Create Phantom Spirit layout
+        self.create_phantom_spirit_layout()
 
         # Start update thread
         self.update_interval = self.config["update_interval"]
@@ -62,9 +54,9 @@ class LEDDisplayUI:
             text="Reset default config",
             command=lambda: self.set_default_config(),
         )
-        reset_button.grid(row=2, column=0, padx=10, pady=10, columnspan=2)
+        reset_button.grid(row=1, column=0, padx=10, pady=10, columnspan=2)
 
-    def create_big_layout(self):
+    def create_phantom_spirit_layout(self):
         # Clear previous layout
         for widget in self.layout_frame.winfo_children():
             widget.destroy()
@@ -81,73 +73,13 @@ class LEDDisplayUI:
         self.create_color_mode(display_frame)
         self.create_display_mode(display_frame, display_modes)
 
-        # Create frames for CPU and GPU
-        self.cpu_frame = self.create_device_frame(led_frame, "cpu", 1)
-        self.gpu_frame = self.create_device_frame(led_frame, "gpu", 2)
+        # Create frames for Phantom Spirit displays
+        usage_frame = self.create_usage_frame_phantom_spirit(led_frame)
+        speed_frame = self.create_speed_frame(led_frame)
+        temp_frame = self.create_temp_frame(led_frame)
 
         # Add controls for group selection and color change
         self.create_controls(led_frame)
-
-    def create_small_layout(self):
-        # Clear previous layout
-        for widget in self.layout_frame.winfo_children():
-            widget.destroy()
-
-        self.number_of_leds = 30
-        self.leds_ui = np.array([None] * self.number_of_leds)
-
-        led_frame = ttk.Frame(self.layout_frame, padding=(10, 10))
-        led_frame.grid(row=0, column=0, padx=10, pady=10)
-        self.config_frame = self.create_config_panel(self.layout_frame)
-
-        # Display controls at the top (row 0)
-        display_frame = ttk.Frame(led_frame, padding=(10, 10))
-        display_frame.grid(row=0, column=0, padx=10, pady=10)
-        self.create_display_mode(display_frame, display_modes_small)
-
-        # Device LED labels in row 1
-        device_led_frame = ttk.Frame(led_frame)
-        device_led_frame.grid(row=1, column=0, columnspan=4, padx=5, pady=5)
-        
-        self.create_label(device_led_frame, "cpu_led", "CP", 0, 0, index=0)
-        self.create_label(device_led_frame, "cpu_led", "U", 0, 1, index=1)
-        self.create_label(device_led_frame, "gpu_led", "GP", 1, 0, index=0)
-        self.create_label(device_led_frame, "gpu_led", "U", 1, 1, index=1)
-
-        # Temperature unit selection in row 1, column 1
-        unit_frame = ttk.Frame(led_frame)
-        unit_frame.grid(row=1, column=1, padx=5, pady=5)
-        
-        # Create clickable labels for °C and °F
-        self.create_label(unit_frame, "celsius", "°C", 0, 0)
-        self.create_label(unit_frame, "fahrenheit", "°F", 1, 0)
-        self.create_label(unit_frame, "percent_led", "%", 2, 0)
-        
-        # Digit frame in row 2
-        digit_frame = ttk.Frame(led_frame)
-        digit_frame.grid(row=2, column=0, columnspan=2, padx=5, pady=5)
-        self.create_segmented_digit_layout(digit_frame, "digit_frame")
-        
-        # Add controls for group selection and color change in row 3
-        self.create_controls(led_frame, row=3)
-
-
-    def change_layout_mode(self):
-        if self.layout_mode.get() == "big":
-            self.leds_indexes = leds_indexes
-            self.config["layout_mode"] = "big"
-            if self.config["display_mode"] not in display_modes:
-                print(f"Warning: Display mode {self.config['display_mode']} not compatible with big layout, switching to metrics.")
-                self.config["display_mode"] = "metrics"
-            self.create_big_layout()
-        else:
-            self.config["layout_mode"] = "small"
-            if self.config["display_mode"] not in display_modes_small:
-                print(f"Warning: Display mode {self.config['display_mode']} not compatible with small layout, switching to alternate metrics.")
-                self.config["display_mode"] = "alternate_metrics"
-            self.leds_indexes = leds_indexes_small
-            self.create_small_layout()
-        self.write_config()
 
     def set_default_config(self):
         self.config = default_config.copy()
@@ -254,10 +186,7 @@ class LEDDisplayUI:
             return self.leds_indexes[led_key][index]
 
     def get_color_key(self):
-        if self.layout_mode.get() == "big":
-            return self.color_mode.get()
-        else:
-            return "metrics"
+        return self.color_mode.get()
 
     def get_color(self, led_key, index=None):
         return f"#{np.array(self.config[self.get_color_key()]['colors'])[self.get_index(led_key, index)]}"
@@ -282,34 +211,78 @@ class LEDDisplayUI:
             else:
                 self.leds_ui[index].config(background=color)
 
-    def create_device_frame(self, root, device_name, row):
-        frame = ttk.LabelFrame(root, text=device_name.upper(), padding=(10, 10))
-        frame.grid(row=row, column=0, padx=10, pady=10)
+    def create_usage_frame_phantom_spirit(self, root):
+        frame = ttk.LabelFrame(root, text="Usage %", padding=(10, 10))
+        frame.grid(row=1, column=0, padx=10, pady=10)
+        
+        # % LED
+        self.create_label(frame, "usage_percent_led", "%", 0, 0)
+        
+        # 100s LED (single LED for >= 100)
+        self.create_label(frame, "usage_100s_led", "1", 0, 1)
+        
+        # 10s and 1s digits
+        digit_frame = ttk.Frame(frame, padding=(5, 5))
+        digit_frame.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
+        if len(self.leds_indexes.get("usage_10s_digit", [])) > 0:
+            self.create_segmented_digit_layout(digit_frame, "usage_10s_digit", number_of_digits=1, index=0)
+        if len(self.leds_indexes.get("usage_1s_digit", [])) > 0:
+            digit_frame2 = ttk.Frame(frame, padding=(5, 5))
+            digit_frame2.grid(row=1, column=1, padx=5, pady=5)
+            self.create_segmented_digit_layout(digit_frame2, "usage_1s_digit", number_of_digits=1, index=0)
+        
+        return frame
 
-        device_led_frame = ttk.Frame(frame)
-        device_led_frame.grid(row=0, column=0, padx=0, pady=0)
-        self.create_label(device_led_frame, device_name+"_led", device_name.upper()[0], 0, 0, index=int(device_name=="cpu"))
-        self.create_label(device_led_frame, device_name+"_led", device_name.upper()[1:], 0, 1, index=int(device_name!="cpu"))
+    def create_speed_frame(self, root):
+        frame = ttk.LabelFrame(root, text="Speed (MHz)", padding=(10, 10))
+        frame.grid(row=1, column=1, padx=10, pady=10)
+        
+        # MHz LED
+        self.create_label(frame, "speed_mhz_led", "MHz", 0, 0)
+        
+        # 4-digit speed display
+        digit_frame = ttk.Frame(frame, padding=(5, 5))
+        digit_frame.grid(row=1, column=0, padx=5, pady=5)
+        self.create_segmented_digit_layout(digit_frame, "speed_1000s_digit", number_of_digits=1, index=0)
+        digit_frame2 = ttk.Frame(frame, padding=(5, 5))
+        digit_frame2.grid(row=1, column=1, padx=5, pady=5)
+        self.create_segmented_digit_layout(digit_frame2, "speed_100s_digit", number_of_digits=1, index=0)
+        digit_frame3 = ttk.Frame(frame, padding=(5, 5))
+        digit_frame3.grid(row=1, column=2, padx=5, pady=5)
+        self.create_segmented_digit_layout(digit_frame3, "speed_10s_digit", number_of_digits=1, index=0)
+        digit_frame4 = ttk.Frame(frame, padding=(5, 5))
+        digit_frame4.grid(row=1, column=3, padx=5, pady=5)
+        self.create_segmented_digit_layout(digit_frame4, "speed_1s_digit", number_of_digits=1, index=0)
+        
+        return frame
 
-        temp_frame = ttk.LabelFrame(frame, text=device_name.upper()+" temp", padding=(10, 10))
-        temp_frame.grid(row=1, column=0, padx=10, pady=10)
-
-        # Add temperature unit selection
+    def create_temp_frame(self, root):
+        frame = ttk.LabelFrame(root, text="Temperature", padding=(10, 10))
+        frame.grid(row=2, column=0, padx=10, pady=10)
+        
+        # CPU/GPU LEDs
+        device_frame = ttk.Frame(frame)
+        device_frame.grid(row=0, column=0, padx=5, pady=5)
+        self.create_label(device_frame, "temp_cpu_led", "CPU", 0, 0)
+        self.create_label(device_frame, "temp_gpu_led", "GPU", 0, 1)
+        
+        # Unit LEDs
         unit_frame = ttk.Frame(frame)
-        unit_frame.grid(row=1, column=1, padx=5, pady=5)
+        unit_frame.grid(row=0, column=1, padx=5, pady=5)
+        self.create_label(unit_frame, "temp_celsius", "°C", 0, 0)
+        self.create_label(unit_frame, "temp_fahrenheit", "°F", 1, 0)
         
-        # Create clickable labels for °C and °F
-        self.create_label(unit_frame, device_name+"_celsius", "°C", 0, 0)
-        self.create_label(unit_frame, device_name+"_fahrenheit", "°F", 1, 0)
-
-        usage_frame = ttk.LabelFrame(frame, text=device_name.upper()+" usage", padding=(10, 10))
-        usage_frame.grid(row=1, column=2, padx=10, pady=10)
-
-        # Create LED layout for CPU and GPU
-        self.create_segmented_digit_layout(temp_frame, device_name+"_temp")
-        self.create_usage_frame(usage_frame, device_name+"_usage")
+        # Temperature digits (100s, 10s, 1s)
+        digit_frame = ttk.Frame(frame, padding=(5, 5))
+        digit_frame.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
+        self.create_segmented_digit_layout(digit_frame, "temp_100s_digit", number_of_digits=1, index=0)
+        digit_frame2 = ttk.Frame(frame, padding=(5, 5))
+        digit_frame2.grid(row=1, column=1, padx=5, pady=5)
+        self.create_segmented_digit_layout(digit_frame2, "temp_10s_digit", number_of_digits=1, index=0)
+        digit_frame3 = ttk.Frame(frame, padding=(5, 5))
+        digit_frame3.grid(row=1, column=2, padx=5, pady=5)
+        self.create_segmented_digit_layout(digit_frame3, "temp_1s_digit", number_of_digits=1, index=0)
         
-        self.create_label(frame, device_name+"_percent_led", "%", 1, 3)
         return frame
 
     def create_label(self, parent_frame, led_key, text, row, column, index=None):

@@ -18,13 +18,17 @@ class Metrics:
             'cpu_temp': None,
             'gpu_temp': None,
             'cpu_usage': None,
-            'gpu_usage': None
+            'gpu_usage': None,
+            'cpu_speed': None,
+            'gpu_speed': None
         }
         self.metrics = {
             'cpu_temp': 0,
             'gpu_temp': 0,
             'cpu_usage': 0,
-            'gpu_usage': 0
+            'gpu_usage': 0,
+            'cpu_speed': 0,
+            'gpu_speed': 0,
         }
         config_path = os.environ.get('DIGITAL_LCD_CONFIG', os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json'))
         try:
@@ -47,18 +51,22 @@ class Metrics:
             self.gpu = None
 
         candidates =  {
-            'cpu_temp': [get_cpu_temp_psutils,get_cpu_temp_linux,get_cpu_temp_windows_wmi,get_cpu_temp_windows_wintmp,get_cpu_temp_raspberry_pi],
+            'cpu_temp': [get_cpu_temp_psutils, get_cpu_temp_linux, get_cpu_temp_raspberry_pi],
             'gpu_temp': [],
             'cpu_usage': [get_cpu_usage],
-            'gpu_usage': []
+            'gpu_usage': [],
+            'cpu_speed': [get_cpu_speed_psutil, get_cpu_speed_proc],
+            'gpu_speed': []
         }
 
         if self.gpu_vendor == 'nvidia':
-            candidates['gpu_temp'] = [get_gpu_temp_nvidia, get_gpu_temp_wintemp]
+            candidates['gpu_temp'] = [get_gpu_temp_nvidia]
             candidates['gpu_usage'] = [get_gpu_usage_nvml, get_gpu_usage_nvidia_smi]
+            candidates['gpu_speed'] = [get_gpu_speed_nvml, get_gpu_speed_nvidia_smi]
         elif self.gpu_vendor == 'amd':
             candidates['gpu_temp'] = [self.get_gpu_temp_amdgpuinfo]
             candidates['gpu_usage'] = [self.get_gpu_usage_amd]
+            candidates['gpu_speed'] = [self.get_gpu_speed_amd]
         for metric, functions in candidates.items():
             for function in functions:
                 try:
@@ -77,6 +85,7 @@ class Metrics:
     def get_metrics(self, temp_unit):
         if time.time() - self.last_update < self.update_interval:
             metrics = self.metrics.copy()
+            metrics['updated'] = False
         else:
             for metric, function in self.metrics_functions.items():
                 if function is not None:
@@ -90,6 +99,7 @@ class Metrics:
                         print(f"Error getting {metric}: {e}")
             self.last_update = time.time()
             metrics = self.metrics.copy()
+            metrics['updated'] = True
 
         for device in ["cpu", "gpu"]:
             if temp_unit[device] == "fahrenheit":
@@ -112,6 +122,17 @@ class Metrics:
             print(f"Error getting AMD GPU temperature: {e}")
             return None
 
+    def get_gpu_speed_amd(self):
+        try:
+            if self.gpu is None:
+                return None
+            else:
+                # Get current GPU clock in MHz
+                return int(self.gpu.query_sclk() / 1000000)  # Convert from Hz to MHz
+        except Exception as e:
+            print(f"Error getting AMD GPU speed: {e}")
+            return None
+
 def get_cpu_temp_psutils():
     try:
         if hasattr(psutil, 'sensors_temperatures'):
@@ -129,22 +150,6 @@ def get_cpu_temp_linux():
             return float(f.read().strip()) / 1000.0
     except Exception:
         return None
-def get_cpu_temp_windows_wmi(): 
-    try:
-        import wmi
-        w = wmi.WMI(namespace="root\\wmi")
-        temperature_info = w.MSAcpi_ThermalZoneTemperature()[0]
-        return (temperature_info.CurrentTemperature / 10.0) - 273.15
-    except Exception:
-        return None
-
-def get_cpu_temp_windows_wintmp():
-    try:
-        import WinTmp
-        return WinTmp.CPU_Temp()
-    except Exception:
-        return None
-    
 def get_cpu_temp_raspberry_pi():
     try:
         output = subprocess.check_output(['vcgencmd', 'measure_temp']).decode()
@@ -175,13 +180,6 @@ def get_gpu_temp_nvidia():
             output = subprocess.check_output(['nvidia-smi', '--query-gpu=temperature.gpu', '--format=csv,noheader']).decode()
             return float(output.strip().split('\n')[0])
     except:
-        return None
-
-def get_gpu_temp_wintemp():
-    try:
-        import WinTmp
-        return WinTmp.GPU_Temp()
-    except Exception:
         return None
 
 def get_cpu_usage():
@@ -217,3 +215,58 @@ def get_gpu_usage_nvml():
             nvmlShutdown()
     except:
         return None
+
+def get_cpu_speed_psutil():
+    """Get CPU frequency using psutil."""
+    try:
+        freq = psutil.cpu_freq()
+        if freq is not None and freq.current is not None:
+            return int(freq.current)
+        return None
+    except Exception:
+        return None
+
+def get_cpu_speed_proc():
+    """Get CPU frequency from /proc/cpuinfo."""
+    try:
+        with open('/proc/cpuinfo', 'r') as f:
+            for line in f:
+                if 'cpu MHz' in line.lower():
+                    match = re.search(r'(\d+\.?\d*)', line)
+                    if match:
+                        return int(float(match.group(1)))
+        return None
+    except Exception:
+        return None
+
+def get_gpu_speed_nvml():
+    """Get GPU clock speed using pynvml."""
+    try:
+        from pynvml import (nvmlInit, nvmlShutdown,
+                        nvmlDeviceGetHandleByIndex,
+                        nvmlDeviceGetClockInfo, NVML_CLOCK_GRAPHICS)
+        nvmlInit()
+        try:
+            handle = nvmlDeviceGetHandleByIndex(0)
+            clock = nvmlDeviceGetClockInfo(handle, NVML_CLOCK_GRAPHICS)
+            return int(clock)
+        finally:
+            nvmlShutdown()
+    except:
+        return None
+
+def get_gpu_speed_nvidia_smi():
+    """Get GPU clock speed using nvidia-smi."""
+    try:
+        output = subprocess.check_output(
+            ['nvidia-smi', '--query-gpu=clocks.current.graphics',
+                '--format=csv,noheader']
+        ).decode().strip()
+        # Output is in MHz, extract number
+        match = re.search(r'(\d+)', output)
+        if match:
+            return int(match.group(1))
+        return None
+    except Exception:
+        return None
+

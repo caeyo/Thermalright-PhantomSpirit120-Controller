@@ -1,6 +1,6 @@
 import numpy as np
 from metrics import Metrics
-from config import leds_indexes, NUMBER_OF_LEDS, leds_indexes_small, display_modes, display_modes_small
+from config import leds_indexes, NUMBER_OF_LEDS, display_modes
 from utils import interpolate_color, get_random_color
 import hid
 import time
@@ -81,6 +81,9 @@ class Controller:
         self.cpt = 0  # For alternate_time cycling
         self.cycle_duration = 50
         self.display_mode = None
+        self.metrics_updates = 0
+        self.alternating_cycle_duration = 5
+        self.showing_cpu = True  # Track which mode we're showing in alternating mode
         self.colors = np.array(["ffe000"] * NUMBER_OF_LEDS)  # Will be set in update()
         self.layout = self.load_layout()
         self.update()
@@ -111,9 +114,21 @@ class Controller:
 
     def set_leds(self, key, value):
         try:
-            self.leds[self.leds_indexes[key]] = value
+            led_index = self.leds_indexes[key]
+            if isinstance(led_index, list):
+                if isinstance(value, (list, np.ndarray)):
+                    for i, idx in enumerate(led_index):
+                        if i < len(value):
+                            self.leds[idx] = value[i]
+                else:
+                    for idx in led_index:
+                        self.leds[idx] = value
+            else:
+                self.leds[led_index] = value
         except KeyError:
             print(f"Warning: Key {key} not found in leds_indexes.")
+        except Exception as e:
+            print(f"Warning: Error setting LEDs for {key}: {e}")
 
     def send_packets(self):
         message = "".join([self.colors[i] if self.leds[i] != 0 else "000000" for i in range(NUMBER_OF_LEDS)])
@@ -124,199 +139,189 @@ class Controller:
             packet = bytes.fromhex('00'+packets[i*128:(i+1)*128])
             self.dev.write(packet)
 
-    def set_temp(self, temperature: int, device='cpu', unit="celsius"):        
-        if temperature < 1000:
-            self.set_leds(device + '_temp', digit_mask[get_number_array(temperature)].flatten())
-            if unit == "celsius":
-                self.set_leds(device + '_celsius', 1)
-            elif unit == "fahrenheit":
-                self.set_leds(device + '_fahrenheit', 1)
-        else:
-            raise Exception("The numbers displayed on the temperature LCD must be less than 1000")
-
-    def set_usage(self, usage : int, device='cpu'):
-        if usage<200:
-            self.set_leds(device+'_usage', np.concatenate(([int(usage>=100)]*2,digit_mask[get_number_array(usage, array_length=2)].flatten())))
-            self.set_leds(device+'_percent_led', 1)
-        else:
-            raise Exception("The numbers displayed on the usage LCD must be less than 200")
 
     def draw_number(self, number, num_digits, digits_mapping):
+        """Draw a number using the digit mapping from layout.json"""
         number_str = f"{number:0{num_digits}d}"
         for i, digit_char in enumerate(number_str):
-            digit = int(digit_char)
-            segments_to_light = digit_to_segments[digit]
-            digit_map = digits_mapping[i]['map']
-            for segment_name in segments_to_light:
-                segment_index = digit_map[segment_name]
-                self.leds[segment_index] = 1
+            if i < len(digits_mapping):
+                digit = int(digit_char)
+                segments_to_light = digit_to_segments[digit]
+                digit_map = digits_mapping[i]['map']
+                for segment_name in segments_to_light:
+                    segment_index = digit_map[segment_name]
+                    self.leds[segment_index] = 1
 
-    def display_peerless_standard(self):
-        """Merged display mode: dual_metrics + peerless_standard with color support"""
+    def draw_usage_phantom_spirit(self, usage):
+        """Draw usage % with special handling for 100s digit LED"""
+        if usage < 0 or usage > 199:
+            return
+        
+        # Draw % LED
+        self.leds[self.layout['usage_percent_led']] = 1
+        
+        # Draw 1s and 10s digits (skip leading zeros)
+        usage_2digit = usage % 100
+        
+        # Always draw 1s digit
+        if len(self.layout['usage_1s_digit']) > 0:
+            self.draw_number(usage_2digit % 10, 1, self.layout['usage_1s_digit'])
+        
+        # Only draw 10s digit if usage >= 10 (skip leading zero)
+        if usage_2digit >= 10 and len(self.layout['usage_10s_digit']) > 0:
+            self.draw_number(usage_2digit // 10, 1, self.layout['usage_10s_digit'])
+        
+        # Light 100s LED if usage >= 100
+        if usage >= 100:
+            self.leds[self.layout['usage_100s_led']] = 1
+
+    def draw_speed_phantom_spirit(self, speed):
+        """Draw 4-digit speed in MHz, skipping leading zeros"""
+        if speed < 0 or speed > 9999:
+            return
+        
+        # Draw MHz LED
+        self.leds[self.layout['speed_mhz_led']] = 1
+        
+        # Draw speed digits, skipping leading zeros
+        # Always draw at least the 1s digit (even if 0)
+        if len(self.layout['speed_digits']) >= 4:
+            # Draw 1s digit (always)
+            self.draw_number(speed % 10, 1, [self.layout['speed_digits'][0]])
+            
+            # Draw 10s digit if speed >= 10
+            if speed >= 10:
+                self.draw_number((speed // 10) % 10, 1, [self.layout['speed_digits'][1]])
+            
+            # Draw 100s digit if speed >= 100
+            if speed >= 100:
+                self.draw_number((speed // 100) % 10, 1, [self.layout['speed_digits'][2]])
+            
+            # Draw 1000s digit if speed >= 1000
+            if speed >= 1000:
+                self.draw_number(speed // 1000, 1, [self.layout['speed_digits'][3]])
+
+    def draw_temp_phantom_spirit(self, temp, device='cpu', unit='celsius'):
+        """Draw 3-digit temperature with CPU/GPU LED and unit, skipping leading zeros"""
+        if temp < 0 or temp > 999:
+            return
+        
+        # Draw CPU or GPU LED
+        if device == 'cpu':
+            self.leds[self.layout['temp_cpu_led']] = 1
+        else:
+            self.leds[self.layout['temp_gpu_led']] = 1
+        
+        # Draw temperature digits, skipping leading zeros
+        # Always draw 1s digit (even if 0)
+        if len(self.layout['temp_1s_digit']) > 0:
+            self.draw_number(temp % 10, 1, self.layout['temp_1s_digit'])
+        
+        # Only draw 10s digit if temp >= 10 (skip leading zero)
+        if temp >= 10 and len(self.layout['temp_10s_digit']) > 0:
+            self.draw_number((temp // 10) % 10, 1, self.layout['temp_10s_digit'])
+        
+        # Only draw 100s digit if temp >= 100 (skip leading zero)
+        if temp >= 100 and len(self.layout['temp_100s_digit']) > 0:
+            self.draw_number(temp // 100, 1, self.layout['temp_100s_digit'])
+        
+        # Draw unit LED
+        if unit == 'celsius':
+            self.leds[self.layout['temp_celsius']] = 1
+        else:
+            self.leds[self.layout['temp_fahrenheit']] = 1
+
+
+    def display_cpu_mode(self):
+        """Display CPU temp, frequency, and usage"""
         if not self.layout:
-            print("Warning: layout.json not loaded. Cannot display peerless standard.")
+            print("Warning: layout.json not loaded. Cannot display CPU mode.")
             return
 
         cpu_unit = self.config.get('cpu_temperature_unit', 'celsius')
         gpu_unit = self.config.get('gpu_temperature_unit', 'celsius')
         temp_unit = {'cpu': cpu_unit, 'gpu': gpu_unit}
 
+        metrics = self.metrics.get_metrics(temp_unit=temp_unit)
+        self.colors = self.get_config_colors(self.config, key="metrics", metrics=metrics)
+
+        cpu_usage = metrics.get("cpu_usage", 0)
+        cpu_speed = metrics.get("cpu_speed", 0)
+        cpu_temp = metrics.get("cpu_temp", 0)
+
+        # Draw usage %
+        self.draw_usage_phantom_spirit(cpu_usage)
+        
+        # Draw speed (frequency)
+        self.draw_speed_phantom_spirit(cpu_speed)
+        
+        # Draw temperature (CPU)
+        self.draw_temp_phantom_spirit(cpu_temp, device='cpu', unit=cpu_unit)
+
+    def display_gpu_mode(self):
+        """Display GPU temp, frequency, and usage"""
+        if not self.layout:
+            print("Warning: layout.json not loaded. Cannot display GPU mode.")
+            return
+
+        cpu_unit = self.config.get('cpu_temperature_unit', 'celsius')
+        gpu_unit = self.config.get('gpu_temperature_unit', 'celsius')
+        temp_unit = {'cpu': cpu_unit, 'gpu': gpu_unit}
+
+        metrics = self.metrics.get_metrics(temp_unit=temp_unit)
+        self.colors = self.get_config_colors(self.config, key="metrics", metrics=metrics)
+
+        gpu_usage = metrics.get("gpu_usage", 0)
+        gpu_speed = metrics.get("gpu_speed", 0)
+        gpu_temp = metrics.get("gpu_temp", 0)
+
+        # Draw usage %
+        self.draw_usage_phantom_spirit(gpu_usage)
+        
+        # Draw speed (frequency)
+        self.draw_speed_phantom_spirit(gpu_speed)
+        
+        # Draw temperature (GPU)
+        self.draw_temp_phantom_spirit(gpu_temp, device='gpu', unit=gpu_unit)
+
+    def display_alternating(self, metrics_updated):
+        """Alternate between CPU and GPU modes based on number of metrics updates"""
+        if not self.layout:
+            print("Warning: layout.json not loaded. Cannot display alternating mode.")
+            return
+
+        cpu_unit = self.config.get('cpu_temperature_unit', 'celsius')
+        gpu_unit = self.config.get('gpu_temperature_unit', 'celsius')
+        temp_unit = {'cpu': cpu_unit, 'gpu': gpu_unit}
+
+        if metrics_updated:
+            self.metrics_updates += 1
+            if self.metrics_updates >= self.alternating_cycle_duration:
+                self.metrics_updates = 0
+                self.showing_cpu = not self.showing_cpu
+        # Get metrics
         metrics = self.metrics.get_metrics(temp_unit=temp_unit)
         
         # Get colors based on current metrics
         self.colors = self.get_config_colors(self.config, key="metrics", metrics=metrics)
-
-        cpu_temp = metrics.get("cpu_temp", 0)
-        cpu_usage = metrics.get("cpu_usage", 0)
-        gpu_temp = metrics.get("gpu_temp", 0)
-        gpu_usage = metrics.get("gpu_usage", 0)
-
-        # Draw CPU Temp
-        self.draw_number(cpu_temp, 3, self.layout['cpu_temp_digits'])
-        if cpu_unit == 'celsius':
-            self.leds[self.layout['cpu_celsius']] = 1
-        else:
-            self.leds[self.layout['cpu_fahrenheit']] = 1
-
-        # Draw CPU Usage
-        self.draw_number(cpu_usage % 100, 2, self.layout['cpu_usage_digits'])
-        if cpu_usage >= 100:
-            self.leds[self.layout['cpu_usage_1']['top']] = 1
-            self.leds[self.layout['cpu_usage_1']['bottom']] = 1
-        self.leds[self.layout['cpu_percent']] = 1
-
-        # Draw GPU Temp
-        self.draw_number(gpu_temp, 3, self.layout['gpu_temp_digits'])
-        if gpu_unit == 'celsius':
-            self.leds[self.layout['gpu_celsius']] = 1
-        else:
-            self.leds[self.layout['gpu_fahrenheit']] = 1
-
-        # Draw GPU Usage
-        self.draw_number(gpu_usage % 100, 2, self.layout['gpu_usage_digits'][::-1])
-        if gpu_usage >= 100:
-            self.leds[self.layout['gpu_usage_1']['top']] = 1
-            self.leds[self.layout['gpu_usage_1']['bottom']] = 1
-        self.leds[self.layout['gpu_percent']] = 1
         
-        # Set CPU and GPU LEDs
-        for led in self.layout['cpu_led']:
-            self.leds[led] = 1
-        for led in self.layout['gpu_led']:
-            self.leds[led] = 1
-
-    def display_peerless_temp(self):
-        if not self.layout:
-            print("Warning: layout.json not loaded. Cannot display peerless temp.")
-            return
-
-        cpu_unit = self.config.get('cpu_temperature_unit', 'celsius')
-        gpu_unit = self.config.get('gpu_temperature_unit', 'celsius')
-        temp_unit = {'cpu': cpu_unit, 'gpu': gpu_unit}
-
-        metrics = self.metrics.get_metrics(temp_unit=temp_unit)
-        self.colors = self.get_config_colors(self.config, key="metrics", metrics=metrics)
-        
-        cpu_temp = metrics.get("cpu_temp", 0)
-        gpu_temp = metrics.get("gpu_temp", 0)
-
-        # Draw CPU Temp
-        self.draw_number(cpu_temp, 3, self.layout['cpu_temp_digits'])
-        if cpu_unit == 'celsius':
-            self.leds[self.layout['cpu_celsius']] = 1
+        # Display the appropriate mode based on showing_cpu flag
+        if self.showing_cpu:
+            # Display CPU mode
+            cpu_usage = metrics.get("cpu_usage", 0)
+            cpu_speed = metrics.get("cpu_speed", 0)
+            cpu_temp = metrics.get("cpu_temp", 0)
+            self.draw_usage_phantom_spirit(cpu_usage)
+            self.draw_speed_phantom_spirit(cpu_speed)
+            self.draw_temp_phantom_spirit(cpu_temp, device='cpu', unit=cpu_unit)
         else:
-            self.leds[self.layout['cpu_fahrenheit']] = 1
-
-        # Draw GPU Temp
-        self.draw_number(gpu_temp, 3, self.layout['gpu_temp_digits'])
-        if gpu_unit == 'celsius':
-            self.leds[self.layout['gpu_celsius']] = 1
-        else:
-            self.leds[self.layout['gpu_fahrenheit']] = 1
-        
-        # Set CPU and GPU LEDs
-        for led in self.layout['cpu_led']:
-            self.leds[led] = 1
-        for led in self.layout['gpu_led']:
-            self.leds[led] = 1
-
-    def display_peerless_usage(self):
-        if not self.layout:
-            print("Warning: layout.json not loaded. Cannot display peerless usage.")
-            return
-
-        cpu_unit = self.config.get('cpu_temperature_unit', 'celsius')
-        gpu_unit = self.config.get('gpu_temperature_unit', 'celsius')
-        temp_unit = {'cpu': cpu_unit, 'gpu': gpu_unit}
-
-        metrics = self.metrics.get_metrics(temp_unit=temp_unit)
-        self.colors = self.get_config_colors(self.config, key="metrics", metrics=metrics)
-        
-        cpu_usage = metrics.get("cpu_usage", 0)
-        gpu_usage = metrics.get("gpu_usage", 0)
-
-        # Draw CPU Usage
-        self.draw_number(cpu_usage % 100, 2, self.layout['cpu_usage_digits'])
-        if cpu_usage >= 100:
-            self.leds[self.layout['cpu_usage_1']['top']] = 1
-            self.leds[self.layout['cpu_usage_1']['bottom']] = 1
-        self.leds[self.layout['cpu_percent']] = 1
-
-        # Draw GPU Usage
-        self.draw_number(gpu_usage % 100, 2, self.layout['gpu_usage_digits'])
-        if gpu_usage >= 100:
-            self.leds[self.layout['gpu_usage_1']['top']] = 1
-            self.leds[self.layout['gpu_usage_1']['bottom']] = 1
-        self.leds[self.layout['gpu_percent']] = 1
-        
-        # Set CPU and GPU LEDs
-        for led in self.layout['cpu_led']:
-            self.leds[led] = 1
-        for led in self.layout['gpu_led']:
-            self.leds[led] = 1
-
-    def display_metrics(self, devices=["cpu","gpu"]):
-        self.temp_unit = {device: self.config.get(f"{device}_temperature_unit", "celsius")for device in ["cpu","gpu"]}
-        metrics = self.metrics.get_metrics(temp_unit=self.temp_unit)
-        for device in devices:
-            self.set_leds(device+"_led", 1)
-            self.set_temp(metrics[device+"_temp"], device=device, unit=self.temp_unit[device])
-            self.set_usage(metrics[device+"_usage"], device=device)
-            self.colors[self.leds_indexes[device]] = self.metrics_colors[self.leds_indexes[device]]
-
-    def display_time(self, device="cpu"):
-        current_time = datetime.datetime.now()
-        self.set_leds(device+'_temp', np.concatenate((digit_mask[get_number_array(current_time.hour, array_length=2, fill_value=0)].flatten(),letter_mask["H"])))
-        self.set_leds(device+'_usage', np.concatenate(([0,0],digit_mask[get_number_array(current_time.minute, array_length=2, fill_value=0)].flatten())))
-        self.colors[self.leds_indexes[device]] = self.time_colors[self.leds_indexes[device]]
-    
-    def display_time_with_seconds(self):
-        current_time = datetime.datetime.now()
-        self.set_leds('cpu_temp', np.concatenate((digit_mask[get_number_array(current_time.hour, array_length=2, fill_value=0)].flatten(),letter_mask["H"])))
-        self.set_leds('gpu_usage', np.concatenate(([0,0],digit_mask[get_number_array(current_time.second, array_length=2, fill_value=0)].flatten())))
-        self.set_leds('cpu_usage', np.concatenate(([0,0],digit_mask[get_number_array(current_time.minute, array_length=2, fill_value=0)].flatten())))
-        self.colors = self.time_colors
-
-    def display_temp_small(self, device='cpu'):
-        unit = {device: self.config.get(f"{device}_temperature_unit", "celsius")for device in ["cpu","gpu"]}
-        self.set_leds(unit[device], 1)
-        self.set_leds(device+'_led', 1)
-        current_temp = self.metrics.get_metrics(self.temp_unit)[f"{device}_temp"]
-        self.colors = self.metrics_colors
-        if current_temp is not None:
-            self.set_leds('digit_frame', digit_mask[get_number_array(current_temp, array_length=3, fill_value=0)].flatten())
-        else:
-            print(f"Warning: {device} temperature not available.")
-    
-    def display_usage_small(self, device='cpu'):   
-        current_usage = self.metrics.get_metrics(self.temp_unit)[f"{device}_usage"]
-        self.set_leds('percent_led', 1)
-        self.set_leds(device+'_led', 1)
-        self.colors = self.metrics_colors
-        if current_usage is not None:
-            self.set_leds('digit_frame', digit_mask[get_number_array(current_usage, array_length=3, fill_value=0)].flatten())
-        else:
-            print(f"Warning: {device} usage not available.")
+            # Display GPU mode
+            gpu_usage = metrics.get("gpu_usage", 0)
+            gpu_speed = metrics.get("gpu_speed", 0)
+            gpu_temp = metrics.get("gpu_temp", 0)
+            self.draw_usage_phantom_spirit(gpu_usage)
+            self.draw_speed_phantom_spirit(gpu_speed)
+            self.draw_temp_phantom_spirit(gpu_temp, device='gpu', unit=gpu_unit)
 
     def get_config_colors(self, config, key="metrics", metrics=None):
         conf_colors = config.get(key, {}).get('colors', ["ffe000"] * NUMBER_OF_LEDS)
@@ -460,6 +465,7 @@ class Controller:
     def update(self):
         self.leds = np.array([0] * NUMBER_OF_LEDS)
         self.config = self.load_config()
+        updated = False
         if self.config:
             VENDOR_ID = int(self.config.get('vendor_id', "0x0416"),16)
             PRODUCT_ID = int(self.config.get('product_id', "0x8001"),16)
@@ -468,35 +474,31 @@ class Controller:
                 "gpu_temp": self.config.get('gpu_max_temp', 90),
                 "cpu_usage": self.config.get('cpu_max_usage', 100),
                 "gpu_usage": self.config.get('gpu_max_usage', 100),
+                "cpu_speed": self.config.get('cpu_max_speed', 5000),
+                "gpu_speed": self.config.get('gpu_max_speed', 2500),
             }
             self.metrics_min_value = {
                 "cpu_temp": self.config.get('cpu_min_temp', 30),
                 "gpu_temp": self.config.get('gpu_min_temp', 30),
                 "cpu_usage": self.config.get('cpu_min_usage', 0),
                 "gpu_usage": self.config.get('gpu_min_usage', 0),
+                "cpu_speed": self.config.get('cpu_min_speed', 0),
+                "gpu_speed": self.config.get('gpu_min_speed', 0),
             }
-            self.display_mode = self.config.get('display_mode', 'metrics')
-            
-            # Handle legacy dual_metrics mode
-            if self.display_mode == 'dual_metrics':
-                self.display_mode = 'peerless_standard'
+            self.display_mode = self.config.get('display_mode', 'cpu')
                 
             self.temp_unit = {device: self.config.get(f"{device}_temperature_unit", "celsius") for device in ["cpu", "gpu"]}
-            self.metrics_colors = self.get_config_colors(self.config, key="metrics")
-            self.time_colors = self.get_config_colors(self.config, key="time")
+            metrics = self.metrics.get_metrics(temp_unit=self.temp_unit)
+            updated = metrics['updated']
+            self.metrics_colors = self.get_config_colors(self.config, key="metrics", metrics=metrics)
+            self.time_colors = self.get_config_colors(self.config, key="time", metrics=metrics)
             self.update_interval = self.config.get('update_interval', 0.1)
             self.cycle_duration = int(self.config.get('cycle_duration', 5)/self.update_interval)
             self.metrics.update_interval = self.config.get('metrics_update_interval', 0.5)
-            if self.config.get('layout_mode', 'big')== 'small':
-                self.leds_indexes = leds_indexes_small
-                if self.display_mode not in display_modes_small:
-                    print(f"Warning: Display mode {self.display_mode} not compatible with small layout, switching to alternate metrics.")
-                    self.display_mode = "alternate_metrics"
-            else:
-                self.leds_indexes = leds_indexes
-                if self.display_mode not in display_modes:
-                    print(f"Warning: Display mode {self.display_mode} not compatible with big layout, switching to metrics.")
-                    self.display_mode = "metrics"
+            self.leds_indexes = leds_indexes
+            if self.display_mode not in display_modes:
+                print(f"Warning: Display mode {self.display_mode} not compatible, switching to cpu.")
+                self.display_mode = "cpu"
         else:
             VENDOR_ID = 0x0416
             PRODUCT_ID = 0x8001
@@ -505,14 +507,18 @@ class Controller:
                 "gpu_temp": 90,
                 "cpu_usage": 100,
                 "gpu_usage": 100,
+                "cpu_speed": 5000,
+                "gpu_speed": 2500,
             }
             self.metrics_min_value = {
                 "cpu_temp": 30,
                 "gpu_temp": 30,
                 "cpu_usage": 0,
                 "gpu_usage": 0,
+                "cpu_speed": 0,
+                "gpu_speed": 0,
             }
-            self.display_mode = 'metrics'
+            self.display_mode = 'cpu'
             self.time_colors = np.array(["ffe000"] * NUMBER_OF_LEDS)
             self.metrics_colors = np.array(["ff0000"] * NUMBER_OF_LEDS)
             self.update_interval = 0.1
@@ -527,66 +533,28 @@ class Controller:
             self.PRODUCT_ID = PRODUCT_ID
             self.dev = self.get_device()
 
+        return updated
+
     def display(self):
         while True:
             self.config = self.load_config()
-            self.update()
+            metrics_updated = self.update()
             if self.dev is None:
                 print("No device found, with VENDOR_ID: {}, PRODUCT_ID: {}".format(self.VENDOR_ID, self.PRODUCT_ID))
                 time.sleep(5)
             else:
-                if self.display_mode == "alternate_time":
-                    if self.cpt < self.cycle_duration:
-                        self.display_time()
-                        self.display_metrics(devices=['gpu'])
-                    else:
-                        self.display_time(device="gpu")
-                        self.display_metrics(devices=['cpu'])
-                elif self.display_mode == "metrics":
-                    self.display_metrics(devices=["cpu", "gpu"])
-                elif self.display_mode == "time":
-                    self.display_time_with_seconds()
-                elif self.display_mode == "time_cpu":
-                    self.display_time(device="gpu")
-                    self.display_metrics(devices=['cpu'])
-                elif self.display_mode == "time_gpu":
-                    self.display_time()
-                    self.display_metrics(devices=['gpu'])
-                elif self.display_mode == "alternate_time_with_seconds":
-                    if self.cpt < self.cycle_duration:
-                        self.display_time_with_seconds()
-                    else:
-                        self.display_metrics()
-                elif self.display_mode == "alternate_metrics":
-                    if self.cpt < self.cycle_duration/2:
-                        self.display_temp_small(device='cpu')
-                    elif self.cpt < self.cycle_duration:
-                        self.display_temp_small(device='gpu')
-                    elif self.cpt < 3*self.cycle_duration/2:
-                        self.display_usage_small(device='cpu')
-                    else:
-                        self.display_usage_small(device='gpu')
-                elif self.display_mode == "cpu_temp":
-                    self.display_temp_small(device='cpu')
-                elif self.display_mode == "gpu_temp":
-                    self.display_temp_small(device='gpu')
-                elif self.display_mode == "cpu_usage":
-                    self.display_usage_small(device='cpu')
-                elif self.display_mode == "gpu_usage":
-                    self.display_usage_small(device='gpu')
-                elif self.display_mode == "peerless_standard":
-                    self.display_peerless_standard()
-                elif self.display_mode == "peerless_temp":
-                    self.display_peerless_temp()
-                elif self.display_mode == "peerless_usage":
-                    self.display_peerless_usage()
+                if self.display_mode == "cpu":
+                    self.display_cpu_mode()
+                elif self.display_mode == "gpu":
+                    self.display_gpu_mode()
+                elif self.display_mode == "alternating":
+                    self.display_alternating(metrics_updated)
                 elif self.display_mode == "debug_ui":
                     self.colors = self.metrics_colors
                     self.leds[:] = 1
                 else:
                     print(f"Unknown display mode: {self.display_mode}")
                 
-                self.cpt = (self.cpt + 1) % (self.cycle_duration*2)
                 self.send_packets()
             time.sleep(self.update_interval)
 
