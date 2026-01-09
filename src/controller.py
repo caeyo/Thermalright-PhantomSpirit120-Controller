@@ -587,22 +587,25 @@ class Controller:
             self.config = self.load_config()
             metrics_updated = self.update()
             if self.dev is None:
-                print("No device found, with VENDOR_ID: {}, PRODUCT_ID: {}".format(self.VENDOR_ID, self.PRODUCT_ID))
-                time.sleep(5)
+                # Try to re-open the HID device
+                self.dev = self.get_device()
+                time.sleep(1)
+                continue
+
+            # existing display logic...
+            if self.display_mode == "cpu":
+                self.display_cpu_mode()
+            elif self.display_mode == "gpu":
+                self.display_gpu_mode()
+            elif self.display_mode == "alternating":
+                self.display_alternating(metrics_updated)
+            elif self.display_mode == "debug_ui":
+                self.colors = self.metrics_colors
+                self.leds[:] = 1
             else:
-                if self.display_mode == "cpu":
-                    self.display_cpu_mode()
-                elif self.display_mode == "gpu":
-                    self.display_gpu_mode()
-                elif self.display_mode == "alternating":
-                    self.display_alternating(metrics_updated)
-                elif self.display_mode == "debug_ui":
-                    self.colors = self.metrics_colors
-                    self.leds[:] = 1
-                else:
-                    print(f"Unknown display mode: {self.display_mode}")
-                
-                self.send_packets()
+                print(f"Unknown display mode: {self.display_mode}")
+
+            self.send_packets()
             time.sleep(self.update_interval)
 
 
