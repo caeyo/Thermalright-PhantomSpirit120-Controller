@@ -243,7 +243,7 @@ class Controller:
         temp_unit = {'cpu': cpu_unit, 'gpu': gpu_unit}
 
         metrics = self.metrics.get_metrics(temp_unit=temp_unit)
-        self.colors = self.get_config_colors(self.config, key="metrics", metrics=metrics)
+        self.colors = self.get_config_colors(self.config, key=getattr(self, "color_mode", "metrics"), metrics=metrics)
 
         cpu_usage = metrics.get("cpu_usage", 0)
         cpu_speed = metrics.get("cpu_speed", 0)
@@ -269,7 +269,7 @@ class Controller:
         temp_unit = {'cpu': cpu_unit, 'gpu': gpu_unit}
 
         metrics = self.metrics.get_metrics(temp_unit=temp_unit)
-        self.colors = self.get_config_colors(self.config, key="metrics", metrics=metrics)
+        self.colors = self.get_config_colors(self.config, key=getattr(self, "color_mode", "metrics"), metrics=metrics)
 
         gpu_usage = metrics.get("gpu_usage", 0)
         gpu_speed = metrics.get("gpu_speed", 0)
@@ -301,9 +301,9 @@ class Controller:
                 self.showing_cpu = not self.showing_cpu
         # Get metrics
         metrics = self.metrics.get_metrics(temp_unit=temp_unit)
-        
+
         # Get colors based on current metrics
-        self.colors = self.get_config_colors(self.config, key="metrics", metrics=metrics)
+        self.colors = self.get_config_colors(self.config, key=getattr(self, "color_mode", "metrics"), metrics=metrics)
         
         # Display the appropriate mode based on showing_cpu flag
         if self.showing_cpu:
@@ -324,15 +324,31 @@ class Controller:
             self.draw_temp_phantom_spirit(gpu_temp, device='gpu', unit=gpu_unit)
 
     def get_config_colors(self, config, key="metrics", metrics=None):
-        conf_colors = config.get(key, {}).get('colors', ["ffe000"] * NUMBER_OF_LEDS)
-        if len(conf_colors) != NUMBER_OF_LEDS:
-            print(f"Warning: config {key} colors length mismatch, using default colors.")
-            colors = ["ff0000"] * NUMBER_OF_LEDS
-        else:
-            if metrics is None:
-                metrics = self.metrics.get_metrics(self.temp_unit)
-            colors = []
-            for i, color in enumerate(conf_colors):
+        conf_colors = config.get(key, {}).get('colors')
+
+        # Normalize colors list length
+        if not conf_colors:
+            conf_colors = ["ffe000"] * NUMBER_OF_LEDS
+        elif len(conf_colors) != NUMBER_OF_LEDS:
+            # For usage mode, just repeat the first pattern across all LEDs silently
+            if key == "usage":
+                base = conf_colors[0]
+                conf_colors = [base] * NUMBER_OF_LEDS
+            else:
+                # Repeat/truncate pattern for other modes (keep a warning for non-usage)
+                print(f"Warning: config {key} colors length mismatch, normalizing to {NUMBER_OF_LEDS} LEDs.")
+                repeated = []
+                while len(repeated) < NUMBER_OF_LEDS:
+                    for c in conf_colors:
+                        repeated.append(c)
+                        if len(repeated) == NUMBER_OF_LEDS:
+                            break
+                conf_colors = repeated
+
+        if metrics is None:
+            metrics = self.metrics.get_metrics(self.temp_unit)
+        colors = []
+        for i, color in enumerate(conf_colors):
                 if color.lower() == "random":
                     colors.append(get_random_color())
                 elif color.startswith("wave_"):
@@ -380,7 +396,36 @@ class Controller:
                         stops.append({'color': stop_parts[0], 'value': int(stop_parts[1])})
                     
                     stops.sort(key=lambda x: x['value'])
-                    
+
+                    # Special non-interpolated usage bands
+                    if metric == "usage":
+                        # Decide which underlying metric to use based on display context
+                        usage_metric = "cpu_usage"
+                        if getattr(self, "display_mode", "cpu") == "gpu":
+                            usage_metric = "gpu_usage"
+                        elif getattr(self, "display_mode", "cpu") == "alternating":
+                            if getattr(self, "showing_cpu", True):
+                                usage_metric = "cpu_usage"
+                            else:
+                                usage_metric = "gpu_usage"
+
+                        if usage_metric not in metrics:
+                            print(f"Warning: {usage_metric} not found in metrics, using first color.")
+                            colors.append(stops[0]['color'])
+                            continue
+
+                        metric_value = metrics[usage_metric]
+
+                        # Choose first band whose threshold is strictly greater than the value;
+                        # if none match, fall back to the last band.
+                        chosen_color = stops[-1]['color']
+                        for band in stops:
+                            if metric_value < band['value']:
+                                chosen_color = band['color']
+                                break
+                        colors.append(chosen_color)
+                        continue
+
                     if metric not in metrics:
                         print(f"Warning: {metric} not found in metrics, using first color.")
                         colors.append(stops[0]['color'])
@@ -486,6 +531,7 @@ class Controller:
                 "gpu_speed": self.config.get('gpu_min_speed', 0),
             }
             self.display_mode = self.config.get('display_mode', 'cpu')
+            self.color_mode = self.config.get('color_mode', 'usage')
                 
             self.temp_unit = {device: self.config.get(f"{device}_temperature_unit", "celsius") for device in ["cpu", "gpu"]}
             metrics = self.metrics.get_metrics(temp_unit=self.temp_unit)
@@ -519,6 +565,7 @@ class Controller:
                 "gpu_speed": 0,
             }
             self.display_mode = 'cpu'
+            self.color_mode = 'metrics'
             self.time_colors = np.array(["ffe000"] * NUMBER_OF_LEDS)
             self.metrics_colors = np.array(["ff0000"] * NUMBER_OF_LEDS)
             self.update_interval = 0.1

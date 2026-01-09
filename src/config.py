@@ -29,12 +29,18 @@ NUMBER_OF_LEDS = 92
 
 default_config = {
     "display_mode": "alternating",
+    "color_mode": "usage",
     "gpu_vendor": "nvidia",
     "metrics": {
-        "colors": ["ffe000"] * 92
+        "colors": ["ffe000"] * NUMBER_OF_LEDS
     },
     "time": {
-        "colors": ["ffe000"] * 92
+        "colors": ["ffe000"] * NUMBER_OF_LEDS
+    },
+    "usage": {
+        "colors": [
+            "usage;00eeff:30;00ff00:50;ffe000:70;ff8000:90;ff0000:100"
+        ] * NUMBER_OF_LEDS
     },
     "update_interval": 0.1,
     "metrics_update_interval": 1.0,
